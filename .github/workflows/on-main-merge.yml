@@ -1,0 +1,47 @@
+name: Validate On Main Merge
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: main-merge-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Run Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          version: "0.10.9"
+
+      - name: Sync dependencies
+        run: uv sync --dev
+
+      - name: Run Ruff
+        run: |
+          uv run ruff check
+          uv run ruff format --check
+
+      - name: Run Pyright
+        run: uv run pyright
+
+      - name: Run Tests
+        run: uv run pytest -v
