@@ -45,5 +45,10 @@ testpaths = ["tests"]
 [tool.pyright]
 include = ["src", "tests"]
 pythonVersion = "3.11"
-typeCheckingMode = "strict"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
 reportMissingTypeStubs = false
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false

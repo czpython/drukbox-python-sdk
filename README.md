@@ -30,9 +30,13 @@ try:
         env={"FOO": "bar"},
         idempotency_key="agent-run-42",
     )
-    # Use host.external_ssh_host (or host.internal_ssh_host when the
-    # service runs with Tailscale enabled), host.external_ssh_port,
-    # and host.known_hosts with asyncssh or another SSH client.
+    # Dial whichever reachable address fits your network: host.external_ssh_host
+    # for the provider's public path (may be empty when the service runs an
+    # AWS-with-Tailscale-on deployment) or host.internal_ssh_host for the
+    # tailnet MagicDNS name (only when Tailscale is enabled). Use host.known_hosts
+    # for SSH host-key verification. If the provider mints a per-VM keypair
+    # (AWS with Tailscale off), host.private_key carries the private half —
+    # returned exactly once at create time; subsequent get_host returns None.
 finally:
     await sandbox.delete_host(host.id)
     await sandbox.aclose()

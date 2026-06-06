@@ -49,6 +49,7 @@ def _host_payload(**overrides: Any) -> dict[str, Any]:
         "internal_ssh_host": "host-abc.example.ts.net",
         "known_hosts": "ssh-ed25519 AAAA...\n",
         "tailscale_device_id": None,
+        "private_key": None,
         "last_error": "",
         "created_at": "2026-05-28T12:00:00+00:00",
         "updated_at": "2026-05-28T12:00:00+00:00",
@@ -197,6 +198,37 @@ async def test_unknown_fields_in_host_payload_are_ignored(api: SandboxAPI):
 
     assert host.id == payload["id"]  # Old fields still parsed.
     assert not hasattr(host, "future_field")  # New field silently dropped.
+
+
+@respx.mock
+async def test_create_host_returns_private_key_when_provider_mints_one(api: SandboxAPI):
+    """AWS with Tailscale-off mints a per-VM ed25519 keypair and returns
+    the private half exactly once at create time. The SDK must round-trip
+    it through to the caller."""
+
+    pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nFAKE\n-----END OPENSSH PRIVATE KEY-----\n"
+    payload = _host_payload(provider="aws", private_key=pem, external_ssh_host="ec2-x.example")
+    respx.post(f"{BASE_URL}/hosts").mock(return_value=httpx.Response(201, json=payload))
+
+    host = await api.create_host()
+
+    assert host.provider == "aws"
+    assert host.private_key == pem
+
+
+@respx.mock
+async def test_get_host_returns_none_private_key_after_create(api: SandboxAPI):
+    """drukbox doesn't persist the key, so a subsequent GET should
+    return None regardless of what was returned at create time."""
+
+    payload = _host_payload(private_key=None)
+    respx.get(f"{BASE_URL}/hosts/{payload['id']}").mock(
+        return_value=httpx.Response(200, json=payload),
+    )
+
+    host = await api.get_host(payload["id"])
+
+    assert host.private_key is None
 
 
 # ---------------------------------------------------------------------------

@@ -61,13 +61,22 @@ _SANDBOX_HTTP_LIMITS = httpx.Limits(
 class SandboxHost:
     """Snapshot of a provisioned host as returned by the service.
 
-    The shape mirrors the Drukbox ``Host`` schema. ``external_ssh_host``
-    is always populated by the VM provider; ``internal_ssh_host`` is
-    populated only when the service runs with Tailscale enabled (MagicDNS
-    name on the tailnet). The internal path is always reached on port 22
-    by Tailscale convention, so there is no ``internal_ssh_port``.
-    Callers pick whichever path they can reach and dial it themselves —
-    this SDK doesn't speak SSH.
+    The shape mirrors the Drukbox ``Host`` schema. Either reachable
+    address may be empty/None depending on the provider and deployment:
+    ``external_ssh_host`` carries the provider's public path (always
+    populated by exe.dev; empty for an AWS host with Tailscale on);
+    ``internal_ssh_host`` carries the tailnet MagicDNS form, populated
+    only when the service runs with Tailscale enabled. The internal
+    path is always reached on port 22 by Tailscale convention, so
+    there is no ``internal_ssh_port``. Callers pick whichever path
+    they can reach and dial it themselves — this SDK doesn't speak SSH.
+
+    ``private_key`` carries per-VM SSH private key material returned
+    exactly once at create time, when the provider mints fresh material
+    per instance (AWS with Tailscale off). Providers that use a
+    different SSH auth model (exe.dev's edge proxy, Tailscale ACLs
+    via tailscaled-SSH) return None here. A later ``get_host`` call
+    always returns None — the key is not persisted server-side.
     """
 
     id: str
@@ -80,6 +89,7 @@ class SandboxHost:
     internal_ssh_host: str | None
     known_hosts: str
     tailscale_device_id: str | None
+    private_key: str | None
     last_error: str
     created_at: str
     updated_at: str
