@@ -46,6 +46,7 @@ def _host_payload(**overrides: Any) -> dict[str, Any]:
         "image": "ghcr.io/drukbox/sandbox:test",
         "external_ssh_host": "203.0.113.42",
         "external_ssh_port": 22,
+        "ssh_username": "exedev",
         "internal_ssh_host": "host-abc.example.ts.net",
         "known_hosts": "ssh-ed25519 AAAA...\n",
         "tailscale_device_id": None,
@@ -103,6 +104,7 @@ async def test_create_host_posts_payload_and_returns_parsed_host(api: SandboxAPI
     assert host.id == payload["id"]
     assert host.external_ssh_host == payload["external_ssh_host"]
     assert host.external_ssh_port == payload["external_ssh_port"]
+    assert host.ssh_username == payload["ssh_username"]
     assert host.internal_ssh_host == payload["internal_ssh_host"]
     assert host.tailscale_device_id is None
     assert host.activated_at is None

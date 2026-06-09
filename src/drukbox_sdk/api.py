@@ -86,6 +86,7 @@ class SandboxHost:
     image: str
     external_ssh_host: str
     external_ssh_port: int
+    ssh_username: str
     internal_ssh_host: str | None
     known_hosts: str
     tailscale_device_id: str | None
