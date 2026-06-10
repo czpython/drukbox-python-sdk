@@ -57,6 +57,7 @@ Public exports live in `drukbox_sdk`:
 
 - `SandboxAPI`
 - `SandboxHost`
+- `DoctorReport` and `DoctorCheck`
 - `SandboxAPIError` and typed subclasses for auth, not found, conflict,
   unavailable, and unclassified response errors
 
@@ -67,10 +68,17 @@ Supported host operations:
 - `attach`
 - `list_hosts`
 - `delete_host`
+- `doctor`
 - `aclose`
 
 `create_host` supports the service's optional `image`, `env`, `expires_at`,
 and `Idempotency-Key` inputs.
+
+`doctor` fetches `GET /doctor` — read-only dependency health. The service
+runs one cheap, non-mutating probe per dependency (database, active VM
+provider, Tailscale when enabled) and always responds 200, so callers branch
+on `DoctorReport.ok` rather than the HTTP status. A failed `DoctorCheck`
+carries a stable `hint` slug for remediation.
 
 The SDK does not mint Tailscale auth keys, manage ACLs, establish SSH,
 provision Linux users, transfer files, or run remote commands.
