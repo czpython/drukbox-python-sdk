@@ -5,6 +5,8 @@ detail and may change without notice.
 """
 
 from .api import (
+    DoctorCheck,
+    DoctorReport,
     SandboxAPI,
     SandboxHost,
 )
@@ -19,6 +21,8 @@ from .exceptions import (
 )
 
 __all__ = [
+    "DoctorCheck",
+    "DoctorReport",
     "SandboxAPI",
     "SandboxAPIError",
     "SandboxAuthError",

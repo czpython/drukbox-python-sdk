@@ -22,6 +22,7 @@ import pytest
 import respx
 
 from drukbox_sdk import (
+    DoctorReport,
     SandboxAPI,
     SandboxAuthError,
     SandboxConflictError,
@@ -33,6 +34,41 @@ from drukbox_sdk import (
 )
 
 BASE_URL = "https://sandbox.test"
+
+
+def _doctor_payload(**overrides: Any) -> dict[str, Any]:
+    """One canonical /doctor payload used across tests; overrides per case."""
+
+    payload: dict[str, Any] = {
+        "ok": True,
+        "active_provider": "aws",
+        "tailscale_enabled": True,
+        "checks": [
+            {
+                "name": "db",
+                "status": "ok",
+                "detail": "select 1 -> 1",
+                "latency_ms": 2,
+                "hint": None,
+            },
+            {
+                "name": "provider",
+                "status": "ok",
+                "detail": "account=111122223333 arn=arn:aws:iam::111122223333:user/drukbox",
+                "latency_ms": 142,
+                "hint": None,
+            },
+            {
+                "name": "tailscale",
+                "status": "ok",
+                "detail": "tailnet=example.ts.net devices=3",
+                "latency_ms": 88,
+                "hint": None,
+            },
+        ],
+    }
+    payload.update(overrides)
+    return payload
 
 
 def _host_payload(**overrides: Any) -> dict[str, Any]:
@@ -451,3 +487,95 @@ def test_from_env_strips_trailing_slash_via_constructor(
     sandbox = SandboxAPI.from_env()
 
     assert sandbox.base_url == "https://trailing.test"
+
+
+@respx.mock
+async def test_doctor_parses_report_and_checks(api: SandboxAPI):
+    route = respx.get(f"{BASE_URL}/doctor").mock(
+        return_value=httpx.Response(200, json=_doctor_payload()),
+    )
+
+    report = await api.doctor()
+
+    assert route.called
+    assert route.calls.last.request.headers["Authorization"] == "Bearer t-test"
+    assert isinstance(report, DoctorReport)
+    assert report.ok is True
+    assert report.active_provider == "aws"
+    assert report.tailscale_enabled is True
+    assert [check.name for check in report.checks] == ["db", "provider", "tailscale"]
+    provider = next(check for check in report.checks if check.name == "provider")
+    assert provider.status == "ok"
+    assert provider.latency_ms == 142
+    assert provider.hint is None
+
+
+@respx.mock
+async def test_doctor_surfaces_failure_with_hint(api: SandboxAPI):
+    """A failed probe round-trips status, detail, and the remediation hint;
+    the HTTP status is still 200, so callers branch on report.ok."""
+
+    payload = _doctor_payload(
+        ok=False,
+        checks=[
+            {
+                "name": "db",
+                "status": "ok",
+                "detail": "select 1 -> 1",
+                "latency_ms": 2,
+                "hint": None,
+            },
+            {
+                "name": "tailscale",
+                "status": "fail",
+                "detail": "Tailscale API authentication failed",
+                "latency_ms": 380,
+                "hint": "check_tailscale_oauth_and_api_reachability",
+            },
+        ],
+    )
+    respx.get(f"{BASE_URL}/doctor").mock(return_value=httpx.Response(200, json=payload))
+
+    report = await api.doctor()
+
+    assert report.ok is False
+    failed = next(check for check in report.checks if check.status == "fail")
+    assert failed.name == "tailscale"
+    assert failed.detail == "Tailscale API authentication failed"
+    assert failed.hint == "check_tailscale_oauth_and_api_reachability"
+
+
+@respx.mock
+async def test_doctor_ignores_unknown_check_fields(api: SandboxAPI):
+    """A future service adding a field to a check must not break today's SDK."""
+
+    payload = _doctor_payload(
+        checks=[
+            {
+                "name": "db",
+                "status": "ok",
+                "detail": "select 1 -> 1",
+                "latency_ms": 2,
+                "hint": None,
+                "future_field": "surprise",
+            },
+        ],
+    )
+    respx.get(f"{BASE_URL}/doctor").mock(return_value=httpx.Response(200, json=payload))
+
+    report = await api.doctor()
+
+    assert report.checks[0].name == "db"
+    assert not hasattr(report.checks[0], "future_field")
+
+
+@respx.mock
+async def test_doctor_401_raises_sandbox_auth_error(api: SandboxAPI):
+    """Doctor is service-token only; a bad token raises like every other call."""
+
+    respx.get(f"{BASE_URL}/doctor").mock(
+        return_value=httpx.Response(401, json={"detail": "service token required"}),
+    )
+
+    with pytest.raises(SandboxAuthError, match="service token required"):
+        await api.doctor()

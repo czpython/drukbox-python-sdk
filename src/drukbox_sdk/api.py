@@ -112,6 +112,46 @@ def _parse_sandbox_host(data: dict[str, Any]) -> SandboxHost:
     return SandboxHost(**{key: data[key] for key in _SANDBOX_HOST_FIELDS})
 
 
+@dataclass(frozen=True)
+class DoctorCheck:
+    """One dependency probe. ``hint`` is a remediation slug, set only on failures."""
+
+    name: str
+    status: str
+    detail: str | None
+    latency_ms: int | None
+    hint: str | None
+
+
+@dataclass(frozen=True)
+class DoctorReport:
+    """Health snapshot. The HTTP status is always 200 — branch on ``ok``."""
+
+    ok: bool
+    active_provider: str
+    tailscale_enabled: bool
+    checks: list[DoctorCheck]
+
+
+def _parse_doctor_check(data: dict[str, Any]) -> DoctorCheck:
+    return DoctorCheck(
+        name=data["name"],
+        status=data["status"],
+        detail=data["detail"],
+        latency_ms=data["latency_ms"],
+        hint=data["hint"],
+    )
+
+
+def _parse_doctor_report(data: dict[str, Any]) -> DoctorReport:
+    return DoctorReport(
+        ok=data["ok"],
+        active_provider=data["active_provider"],
+        tailscale_enabled=data["tailscale_enabled"],
+        checks=[_parse_doctor_check(check) for check in data["checks"]],
+    )
+
+
 class SandboxAPI:
     """Async client for Drukbox.
 
@@ -230,6 +270,17 @@ class SandboxAPI:
 
     async def delete_host(self, host_id: uuid.UUID | str) -> None:
         await self._request("DELETE", f"/hosts/{host_id}")
+
+    async def doctor(self) -> DoctorReport:
+        """Fetch ``GET /doctor`` — read-only dependency health.
+
+        Always responds 200; inspect :attr:`DoctorReport.ok`, not the HTTP
+        status. Auth failures raise :class:`SandboxAuthError`.
+        """
+
+        data = await self._request("GET", "/doctor")
+        assert isinstance(data, dict)
+        return _parse_doctor_report(data)
 
     async def aclose(self) -> None:
         if self._client is None:
