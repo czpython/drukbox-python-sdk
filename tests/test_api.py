@@ -164,7 +164,21 @@ async def test_create_host_omits_image_and_env_when_unset(api: SandboxAPI):
     assert "image" not in body
     assert "env" not in body
     assert "expires_at" not in body
+    assert "provider" not in body
     assert "Idempotency-Key" not in route.calls.last.request.headers
+
+
+@respx.mock
+async def test_create_host_sends_provider_when_set(api: SandboxAPI):
+    payload = _host_payload(provider="hetzner")
+    route = respx.post(f"{BASE_URL}/hosts").mock(
+        return_value=httpx.Response(201, json=payload),
+    )
+
+    host = await api.create_host(provider="hetzner")
+
+    assert '"provider":"hetzner"' in route.calls.last.request.content.decode()
+    assert host.provider == "hetzner"
 
 
 @respx.mock

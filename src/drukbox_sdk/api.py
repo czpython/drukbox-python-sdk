@@ -214,6 +214,7 @@ class SandboxAPI:
         expires_at: datetime | None = None,
         idempotency_key: str | None = None,
         image: str | None = None,
+        provider: str | None = None,
     ) -> SandboxHost:
         """Provision a new host.
 
@@ -228,6 +229,10 @@ class SandboxAPI:
         header. Useful for retry safety on flaky networks — a retry with
         the same key after a successful provision returns the original
         host instead of creating a duplicate.
+
+        ``provider`` pins which VM provider serves the request; omit it to
+        use the service default. An unknown provider raises
+        :class:`SandboxResponseError` (the service rejects it with 400).
         """
 
         payload: dict[str, Any] = {}
@@ -237,6 +242,8 @@ class SandboxAPI:
             payload["expires_at"] = expires_at.isoformat()
         if image is not None:
             payload["image"] = image
+        if provider is not None:
+            payload["provider"] = provider
 
         headers: dict[str, str] = {}
         if idempotency_key is not None:
