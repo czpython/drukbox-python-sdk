@@ -72,7 +72,7 @@ Supported host operations:
 - `aclose`
 
 `create_host` supports the service's optional `image`, `env`, `expires_at`,
-and `Idempotency-Key` inputs.
+`provider`, and `Idempotency-Key` inputs.
 
 `doctor` fetches `GET /doctor` — read-only dependency health. The service
 runs one cheap, non-mutating probe per dependency (database, active VM
