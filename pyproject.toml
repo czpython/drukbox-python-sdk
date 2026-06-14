@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "drukbox-python-sdk"
-version = "0.0.4"
+version = "0.0.5"
 description = "Async Python client for Drukbox."
 readme = "README.md"
 # Tracks the lowest Python any current consumer supports. Bump only
