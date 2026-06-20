@@ -18,6 +18,7 @@ from .exceptions import (
     SandboxProvisioningError,
     SandboxResponseError,
     SandboxUnavailableError,
+    SandboxValidationError,
 )
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "SandboxProvisioningError",
     "SandboxResponseError",
     "SandboxUnavailableError",
+    "SandboxValidationError",
 ]

@@ -45,6 +45,7 @@ from .exceptions import (
     SandboxProvisioningError,
     SandboxResponseError,
     SandboxUnavailableError,
+    SandboxValidationError,
 )
 
 # Explicit pool budget. The httpx defaults (100 / 20) are plenty for
@@ -349,6 +350,14 @@ class SandboxAPI:
 
         if response.status_code == 503:
             raise SandboxUnavailableError(json_response.get("detail", "service unavailable"))
+
+        if response.status_code == 422:
+            # FastAPI's 422 detail is a list of error dicts; join the messages
+            # so it reads as a line, not a raw list repr.
+            detail = json_response.get("detail", "validation error")
+            if isinstance(detail, list):
+                detail = "; ".join(item.get("msg", "") for item in detail) or "validation error"
+            raise SandboxValidationError(detail)
 
         if response.status_code >= 400:
             raise SandboxResponseError(json_response.get("detail", "error"))

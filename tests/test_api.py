@@ -31,6 +31,7 @@ from drukbox_sdk import (
     SandboxProvisioningError,
     SandboxResponseError,
     SandboxUnavailableError,
+    SandboxValidationError,
 )
 
 BASE_URL = "https://sandbox.test"
@@ -331,6 +332,28 @@ async def test_409_raises_sandbox_conflict_error(api: SandboxAPI):
 
     with pytest.raises(SandboxConflictError, match="host is still provisioning"):
         await api.delete_host(host_id)
+
+
+@respx.mock
+async def test_422_raises_sandbox_validation_error(api: SandboxAPI):
+    # FastAPI's 422 detail is a list of error dicts; the SDK flattens it to a
+    # readable line and raises the dedicated validation error (don't-retry).
+    respx.post(f"{BASE_URL}/hosts").mock(
+        return_value=httpx.Response(
+            422,
+            json={
+                "detail": [
+                    {
+                        "loc": ["body", "env"],
+                        "msg": "env keys must be valid environment variable names: FOO BAR",
+                    }
+                ]
+            },
+        ),
+    )
+
+    with pytest.raises(SandboxValidationError, match="env keys must be valid"):
+        await api.create_host(env={"FOO BAR": "x"})
 
 
 @respx.mock

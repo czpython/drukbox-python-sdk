@@ -50,5 +50,14 @@ class SandboxProvisioningError(SandboxAPIError):
     """
 
 
+class SandboxValidationError(SandboxAPIError):
+    """422 — the service rejected the request payload as invalid.
+
+    e.g. an env key that isn't a valid environment-variable name, or a
+    proxy target URL carrying a path or credentials. The request is
+    malformed, so retrying it unchanged won't help — fix the input.
+    """
+
+
 class SandboxResponseError(SandboxAPIError):
     """Everything else the service returned that the SDK doesn't classify."""
