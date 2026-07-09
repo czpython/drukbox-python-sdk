@@ -7,6 +7,8 @@ detail and may change without notice.
 from .api import (
     DoctorCheck,
     DoctorReport,
+    HTTPProxy,
+    HTTPProxyAttachment,
     SandboxAPI,
     SandboxHost,
 )
@@ -24,6 +26,8 @@ from .exceptions import (
 __all__ = [
     "DoctorCheck",
     "DoctorReport",
+    "HTTPProxy",
+    "HTTPProxyAttachment",
     "SandboxAPI",
     "SandboxAPIError",
     "SandboxAuthError",

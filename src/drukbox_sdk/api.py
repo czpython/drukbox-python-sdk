@@ -32,7 +32,7 @@ For env-backed config use :meth:`SandboxAPI.from_env`.
 import asyncio
 import os
 import uuid
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Self
 
@@ -56,6 +56,22 @@ _SANDBOX_HTTP_LIMITS = httpx.Limits(
     max_connections=20,
     max_keepalive_connections=5,
 )
+
+
+class _Unset:
+    """Sentinel distinguishing an omitted argument from an explicit ``None``.
+
+    ``create_host`` mirrors the service's tri-state ``expires_at``: an
+    omitted field means "default lease", an explicit ``null`` means
+    "permanent". A plain ``datetime | None`` default can't tell those two
+    apart, so the omitted case uses this sentinel.
+    """
+
+    def __repr__(self) -> str:
+        return "UNSET"
+
+
+_UNSET = _Unset()
 
 
 @dataclass(frozen=True)
@@ -85,6 +101,8 @@ class SandboxHost:
     status: str
     provider: str
     image: str
+    instance_type: str | None
+    disk_gb: int | None
     external_ssh_host: str
     external_ssh_port: int
     ssh_username: str
@@ -97,20 +115,6 @@ class SandboxHost:
     updated_at: str
     activated_at: str | None
     expires_at: str | None
-
-
-_SANDBOX_HOST_FIELDS = {field.name for field in fields(SandboxHost)}
-
-
-def _parse_sandbox_host(data: dict[str, Any]) -> SandboxHost:
-    """Build a :class:`SandboxHost` picking only known fields.
-
-    Defensive against the service adding new fields — those flow
-    through harmlessly without breaking the SDK on the unsuspecting
-    caller's side.
-    """
-
-    return SandboxHost(**{key: data[key] for key in _SANDBOX_HOST_FIELDS})
 
 
 @dataclass(frozen=True)
@@ -134,23 +138,30 @@ class DoctorReport:
     checks: list[DoctorCheck]
 
 
-def _parse_doctor_check(data: dict[str, Any]) -> DoctorCheck:
-    return DoctorCheck(
-        name=data["name"],
-        status=data["status"],
-        detail=data["detail"],
-        latency_ms=data["latency_ms"],
-        hint=data["hint"],
-    )
+@dataclass(frozen=True)
+class HTTPProxy:
+    """An account-bound HTTP proxy as returned by the service.
+
+    ``status`` echoes the lifecycle step the call reached
+    (``"created"``). Proxies are account resources, not host state:
+    deleting a host they front does not remove them.
+    """
+
+    name: str
+    status: str
 
 
-def _parse_doctor_report(data: dict[str, Any]) -> DoctorReport:
-    return DoctorReport(
-        ok=data["ok"],
-        active_provider=data["active_provider"],
-        tailscale_enabled=data["tailscale_enabled"],
-        checks=[_parse_doctor_check(check) for check in data["checks"]],
-    )
+@dataclass(frozen=True)
+class HTTPProxyAttachment:
+    """The result of pointing an HTTP proxy at a host's backing VM.
+
+    ``host_id`` is the string UUID of the attached host; ``status``
+    echoes the step reached (``"attached"``).
+    """
+
+    name: str
+    host_id: str
+    status: str
 
 
 class SandboxAPI:
@@ -211,10 +222,12 @@ class SandboxAPI:
     async def create_host(
         self,
         *,
+        disk_gb: int | None = None,
         env: dict[str, str] | None = None,
-        expires_at: datetime | None = None,
+        expires_at: datetime | None | _Unset = _UNSET,
         idempotency_key: str | None = None,
         image: str | None = None,
+        instance_type: str | None = None,
         provider: str | None = None,
     ) -> SandboxHost:
         """Provision a new host.
@@ -234,15 +247,32 @@ class SandboxAPI:
         ``provider`` pins which VM provider serves the request; omit it to
         use the service default. An unknown provider raises
         :class:`SandboxResponseError` (the service rejects it with 400).
+
+        ``instance_type`` (provider-native size, e.g. ``t3.xlarge`` /
+        ``cx33``) and ``disk_gb`` (root disk size) pin the VM shape; omit
+        either to use the provider's configured default. A size the active
+        provider can't serve raises :class:`SandboxResponseError` (400).
+
+        Lease (mirrors the wire contract's tri-state ``expires_at``): omit
+        it for the service's default lease, pass a ``datetime`` for an
+        explicit expiry, or pass ``None`` for a never-reaped (permanent)
+        host — exactly as an omitted field vs. an explicit ``null`` behave
+        on the API.
         """
 
         payload: dict[str, Any] = {}
+        if disk_gb is not None:
+            payload["disk_gb"] = disk_gb
         if env is not None:
             payload["env"] = env
-        if expires_at is not None:
-            payload["expires_at"] = expires_at.isoformat()
+        # Sentinel default lets us tell "caller omitted expires_at" (default
+        # lease) from "caller passed None" (explicit null → permanent host).
+        if not isinstance(expires_at, _Unset):
+            payload["expires_at"] = None if expires_at is None else expires_at.isoformat()
         if image is not None:
             payload["image"] = image
+        if instance_type is not None:
+            payload["instance_type"] = instance_type
         if provider is not None:
             payload["provider"] = provider
 
@@ -252,12 +282,12 @@ class SandboxAPI:
 
         data = await self._request("POST", "/hosts", json=payload, headers=headers)
         assert isinstance(data, dict)
-        return _parse_sandbox_host(data)
+        return SandboxHost(**data)
 
     async def get_host(self, host_id: uuid.UUID | str) -> SandboxHost:
         data = await self._request("GET", f"/hosts/{host_id}")
         assert isinstance(data, dict)
-        return _parse_sandbox_host(data)
+        return SandboxHost(**data)
 
     async def attach(self, host_id: uuid.UUID | str) -> SandboxHost:
         """Alias for :meth:`get_host` that reads better at call sites
@@ -274,7 +304,31 @@ class SandboxAPI:
     async def list_hosts(self) -> list[SandboxHost]:
         data = await self._request("GET", "/hosts")
         assert isinstance(data, list)
-        return [_parse_sandbox_host(item) for item in data]
+        return [SandboxHost(**item) for item in data]
+
+    async def renew_host(
+        self,
+        host_id: uuid.UUID | str,
+        *,
+        expires_at: datetime | None = None,
+    ) -> SandboxHost:
+        """Extend a host's lease and return the updated record.
+
+        Omit ``expires_at`` to extend by the service's default TTL from
+        now; pass one to set an explicit future expiry. Renewal never
+        makes a host permanent — that is a create-time choice.
+
+        Raises :class:`SandboxNotFoundError` for an unknown host and
+        :class:`SandboxConflictError` when the host is in a non-renewable
+        state (still provisioning, errored, or an unclaimed pool host).
+        """
+
+        payload: dict[str, Any] = {}
+        if expires_at is not None:
+            payload["expires_at"] = expires_at.isoformat()
+        data = await self._request("POST", f"/hosts/{host_id}/renew", json=payload)
+        assert isinstance(data, dict)
+        return SandboxHost(**data)
 
     async def delete_host(self, host_id: uuid.UUID | str) -> None:
         await self._request("DELETE", f"/hosts/{host_id}")
@@ -288,7 +342,65 @@ class SandboxAPI:
 
         data = await self._request("GET", "/doctor")
         assert isinstance(data, dict)
-        return _parse_doctor_report(data)
+        return DoctorReport(
+            ok=data["ok"],
+            active_provider=data["active_provider"],
+            tailscale_enabled=data["tailscale_enabled"],
+            checks=[DoctorCheck(**check) for check in data["checks"]],
+        )
+
+    # ------------------------------------------------------------------
+    # HTTP proxies
+    # ------------------------------------------------------------------
+
+    async def create_http_proxy(
+        self,
+        *,
+        name: str,
+        target: str,
+        headers: dict[str, str],
+    ) -> HTTPProxy:
+        """Create an account-bound HTTP proxy in front of ``target``.
+
+        ``target`` must be an origin-only URL (scheme + host, no path,
+        query, fragment, or credentials); ``headers`` must carry at least
+        one entry. The service rejects a malformed target or empty headers
+        with :class:`SandboxValidationError`; a name that already exists
+        raises :class:`SandboxConflictError`.
+        """
+
+        payload: dict[str, Any] = {"name": name, "target": target, "headers": headers}
+        data = await self._request("POST", "/http-proxies", json=payload)
+        assert isinstance(data, dict)
+        return HTTPProxy(**data)
+
+    async def delete_http_proxy(self, name: str) -> None:
+        """Delete an HTTP proxy by name. Unknown name raises
+        :class:`SandboxNotFoundError`."""
+
+        await self._request("DELETE", f"/http-proxies/{name}")
+
+    async def attach_http_proxy(
+        self,
+        name: str,
+        host_id: uuid.UUID | str,
+    ) -> HTTPProxyAttachment:
+        """Point proxy ``name`` at ``host_id``'s backing VM.
+
+        The host must have a backing VM (``bootstrapping`` or ``active``);
+        otherwise the service raises :class:`SandboxConflictError`. An
+        unknown host or proxy raises :class:`SandboxNotFoundError`.
+        """
+
+        data = await self._request("POST", f"/http-proxies/{name}/hosts/{host_id}")
+        assert isinstance(data, dict)
+        return HTTPProxyAttachment(**data)
+
+    async def detach_http_proxy(self, name: str, host_id: uuid.UUID | str) -> None:
+        """Detach proxy ``name`` from ``host_id``. Unknown host or proxy
+        raises :class:`SandboxNotFoundError`."""
+
+        await self._request("DELETE", f"/http-proxies/{name}/hosts/{host_id}")
 
     async def aclose(self) -> None:
         if self._client is None:

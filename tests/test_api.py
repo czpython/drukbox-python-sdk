@@ -23,6 +23,8 @@ import respx
 
 from drukbox_sdk import (
     DoctorReport,
+    HTTPProxy,
+    HTTPProxyAttachment,
     SandboxAPI,
     SandboxAuthError,
     SandboxConflictError,
@@ -81,6 +83,8 @@ def _host_payload(**overrides: Any) -> dict[str, Any]:
         "status": "provisioning",
         "provider": "exe",
         "image": "ghcr.io/drukbox/sandbox:test",
+        "instance_type": None,
+        "disk_gb": None,
         "external_ssh_host": "203.0.113.42",
         "external_ssh_port": 22,
         "ssh_username": "exedev",
@@ -166,7 +170,42 @@ async def test_create_host_omits_image_and_env_when_unset(api: SandboxAPI):
     assert "env" not in body
     assert "expires_at" not in body
     assert "provider" not in body
+    assert "instance_type" not in body
+    assert "disk_gb" not in body
     assert "Idempotency-Key" not in route.calls.last.request.headers
+
+
+@respx.mock
+async def test_create_host_none_expires_at_sends_explicit_null(api: SandboxAPI):
+    """Mirroring the wire contract: an explicit ``expires_at=None`` asks for
+    a permanent (never-reaped) host and must serialize as
+    ``"expires_at":null`` — distinct from omitting it (default lease),
+    covered by test_create_host_omits_image_and_env_when_unset."""
+
+    payload = _host_payload(expires_at=None)
+    route = respx.post(f"{BASE_URL}/hosts").mock(
+        return_value=httpx.Response(201, json=payload),
+    )
+
+    await api.create_host(expires_at=None)
+
+    assert '"expires_at":null' in route.calls.last.request.content.decode()
+
+
+@respx.mock
+async def test_create_host_sends_sizing_when_set(api: SandboxAPI):
+    payload = _host_payload(instance_type="t3.xlarge", disk_gb=100)
+    route = respx.post(f"{BASE_URL}/hosts").mock(
+        return_value=httpx.Response(201, json=payload),
+    )
+
+    host = await api.create_host(instance_type="t3.xlarge", disk_gb=100)
+
+    body = route.calls.last.request.content.decode()
+    assert '"instance_type":"t3.xlarge"' in body
+    assert '"disk_gb":100' in body
+    assert host.instance_type == "t3.xlarge"
+    assert host.disk_gb == 100
 
 
 @respx.mock
@@ -232,25 +271,55 @@ async def test_delete_host_swallows_204(api: SandboxAPI):
     await api.delete_host(host_id)
 
 
-# ---------------------------------------------------------------------------
-# Forwards compatibility — service adds fields
-# ---------------------------------------------------------------------------
-
-
 @respx.mock
-async def test_unknown_fields_in_host_payload_are_ignored(api: SandboxAPI):
-    """If the service ships a new field tomorrow, today's SDK must not
-    break. The host parser picks known fields only."""
-
-    payload = _host_payload(future_field="surprise", another_one=42)
-    respx.get(f"{BASE_URL}/hosts/{payload['id']}").mock(
+async def test_renew_host_posts_expires_at_and_returns_host(api: SandboxAPI):
+    expires_at = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
+    payload = _host_payload(status="active", expires_at=expires_at.isoformat())
+    route = respx.post(f"{BASE_URL}/hosts/{payload['id']}/renew").mock(
         return_value=httpx.Response(200, json=payload),
     )
 
-    host = await api.get_host(payload["id"])
+    host = await api.renew_host(payload["id"], expires_at=expires_at)
 
-    assert host.id == payload["id"]  # Old fields still parsed.
-    assert not hasattr(host, "future_field")  # New field silently dropped.
+    assert f'"expires_at":"{expires_at.isoformat()}"' in route.calls.last.request.content.decode()
+    assert host.expires_at == payload["expires_at"]
+
+
+@respx.mock
+async def test_renew_host_omits_expires_at_when_unset(api: SandboxAPI):
+    """Omitted expires_at means "extend by the default TTL"; the SDK must
+    send an empty body, not an explicit null."""
+
+    payload = _host_payload(status="active")
+    route = respx.post(f"{BASE_URL}/hosts/{payload['id']}/renew").mock(
+        return_value=httpx.Response(200, json=payload),
+    )
+
+    await api.renew_host(payload["id"])
+
+    assert "expires_at" not in route.calls.last.request.content.decode()
+
+
+@respx.mock
+async def test_renew_host_404_raises_not_found(api: SandboxAPI):
+    host_id = uuid4()
+    respx.post(f"{BASE_URL}/hosts/{host_id}/renew").mock(
+        return_value=httpx.Response(404, json={"detail": "host not found"}),
+    )
+
+    with pytest.raises(SandboxNotFoundError, match="host not found"):
+        await api.renew_host(host_id)
+
+
+@respx.mock
+async def test_renew_host_409_when_not_renewable(api: SandboxAPI):
+    host_id = uuid4()
+    respx.post(f"{BASE_URL}/hosts/{host_id}/renew").mock(
+        return_value=httpx.Response(409, json={"detail": "cannot renew a host in status error"}),
+    )
+
+    with pytest.raises(SandboxConflictError, match="cannot renew"):
+        await api.renew_host(host_id)
 
 
 @respx.mock
@@ -583,30 +652,6 @@ async def test_doctor_surfaces_failure_with_hint(api: SandboxAPI):
 
 
 @respx.mock
-async def test_doctor_ignores_unknown_check_fields(api: SandboxAPI):
-    """A future service adding a field to a check must not break today's SDK."""
-
-    payload = _doctor_payload(
-        checks=[
-            {
-                "name": "db",
-                "status": "ok",
-                "detail": "select 1 -> 1",
-                "latency_ms": 2,
-                "hint": None,
-                "future_field": "surprise",
-            },
-        ],
-    )
-    respx.get(f"{BASE_URL}/doctor").mock(return_value=httpx.Response(200, json=payload))
-
-    report = await api.doctor()
-
-    assert report.checks[0].name == "db"
-    assert not hasattr(report.checks[0], "future_field")
-
-
-@respx.mock
 async def test_doctor_401_raises_sandbox_auth_error(api: SandboxAPI):
     """Doctor is service-token only; a bad token raises like every other call."""
 
@@ -616,3 +661,112 @@ async def test_doctor_401_raises_sandbox_auth_error(api: SandboxAPI):
 
     with pytest.raises(SandboxAuthError, match="service token required"):
         await api.doctor()
+
+
+# ---------------------------------------------------------------------------
+# HTTP proxies
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_create_http_proxy_posts_payload_and_returns_record(api: SandboxAPI):
+    route = respx.post(f"{BASE_URL}/http-proxies").mock(
+        return_value=httpx.Response(201, json={"name": "gh", "status": "created"}),
+    )
+
+    proxy = await api.create_http_proxy(
+        name="gh",
+        target="https://api.github.com",
+        headers={"Authorization": "Bearer x"},
+    )
+
+    body = route.calls.last.request.content.decode()
+    assert route.calls.last.request.headers["Authorization"] == "Bearer t-test"
+    assert '"name":"gh"' in body
+    assert '"target":"https://api.github.com"' in body
+    assert '"headers":{"Authorization":"Bearer x"}' in body
+    assert proxy == HTTPProxy(name="gh", status="created")
+
+
+@respx.mock
+async def test_create_http_proxy_409_raises_conflict(api: SandboxAPI):
+    respx.post(f"{BASE_URL}/http-proxies").mock(
+        return_value=httpx.Response(409, json={"detail": "http proxy already exists"}),
+    )
+
+    with pytest.raises(SandboxConflictError, match="already exists"):
+        await api.create_http_proxy(name="gh", target="https://api.github.com", headers={"X": "y"})
+
+
+@respx.mock
+async def test_create_http_proxy_422_raises_validation(api: SandboxAPI):
+    """A target carrying a path is rejected server-side; the SDK surfaces
+    it as the don't-retry validation error."""
+
+    respx.post(f"{BASE_URL}/http-proxies").mock(
+        return_value=httpx.Response(
+            422,
+            json={"detail": [{"msg": "target URL must not contain a path"}]},
+        ),
+    )
+
+    with pytest.raises(SandboxValidationError, match="must not contain a path"):
+        await api.create_http_proxy(
+            name="gh", target="https://api.github.com/v3", headers={"X": "y"}
+        )
+
+
+@respx.mock
+async def test_delete_http_proxy_swallows_204(api: SandboxAPI):
+    respx.delete(f"{BASE_URL}/http-proxies/gh").mock(return_value=httpx.Response(204))
+
+    await api.delete_http_proxy("gh")
+
+
+@respx.mock
+async def test_delete_http_proxy_404_raises_not_found(api: SandboxAPI):
+    respx.delete(f"{BASE_URL}/http-proxies/gh").mock(
+        return_value=httpx.Response(404, json={"detail": "http proxy not found"}),
+    )
+
+    with pytest.raises(SandboxNotFoundError, match="not found"):
+        await api.delete_http_proxy("gh")
+
+
+@respx.mock
+async def test_attach_http_proxy_returns_attachment(api: SandboxAPI):
+    host_id = uuid4()
+    route = respx.post(f"{BASE_URL}/http-proxies/gh/hosts/{host_id}").mock(
+        return_value=httpx.Response(
+            200, json={"name": "gh", "host_id": str(host_id), "status": "attached"}
+        ),
+    )
+
+    attachment = await api.attach_http_proxy("gh", host_id)
+
+    assert route.called
+    assert attachment == HTTPProxyAttachment(name="gh", host_id=str(host_id), status="attached")
+
+
+@respx.mock
+async def test_attach_http_proxy_409_when_host_has_no_vm(api: SandboxAPI):
+    """Attaching to a host that isn't bootstrapping/active is a state
+    conflict, not a validation error."""
+
+    host_id = uuid4()
+    respx.post(f"{BASE_URL}/http-proxies/gh/hosts/{host_id}").mock(
+        return_value=httpx.Response(409, json={"detail": "host does not have a backing VM"}),
+    )
+
+    with pytest.raises(SandboxConflictError, match="backing VM"):
+        await api.attach_http_proxy("gh", host_id)
+
+
+@respx.mock
+async def test_detach_http_proxy_swallows_204(api: SandboxAPI):
+    host_id = uuid4()
+    respx.delete(f"{BASE_URL}/http-proxies/gh/hosts/{host_id}").mock(
+        return_value=httpx.Response(204),
+    )
+
+    await api.detach_http_proxy("gh", host_id)

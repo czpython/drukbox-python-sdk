@@ -58,6 +58,7 @@ Public exports live in `drukbox_sdk`:
 - `SandboxAPI`
 - `SandboxHost`
 - `DoctorReport` and `DoctorCheck`
+- `HTTPProxy` and `HTTPProxyAttachment`
 - `SandboxAPIError` and typed subclasses for auth, not found, conflict,
   unavailable, and unclassified response errors
 
@@ -67,12 +68,34 @@ Supported host operations:
 - `get_host`
 - `attach`
 - `list_hosts`
+- `renew_host`
 - `delete_host`
 - `doctor`
 - `aclose`
 
 `create_host` supports the service's optional `image`, `env`, `expires_at`,
-`provider`, and `Idempotency-Key` inputs.
+`provider`, `instance_type`, `disk_gb`, and `Idempotency-Key` inputs.
+`instance_type` (provider-native size, e.g. `t3.xlarge` / `cx33`) and `disk_gb`
+pin the VM shape; omit either for the provider default. `expires_at` mirrors the
+wire contract: omit it for the default lease, pass a datetime for an explicit
+expiry, or pass `None` for a never-reaped (permanent) host.
+
+`renew_host` extends a host's lease via `POST /hosts/{id}/renew`. Omit
+`expires_at` to extend by the service's default TTL; renewal never makes a host
+permanent.
+
+Supported HTTP-proxy operations:
+
+- `create_http_proxy`
+- `delete_http_proxy`
+- `attach_http_proxy`
+- `detach_http_proxy`
+
+HTTP proxies are account-bound exe.dev resources, not host state — deleting a
+host does not remove proxies fronting it. `create_http_proxy` takes an
+origin-only `target` (scheme + host, no path/query/fragment/credentials) and at
+least one `headers` entry; `attach_http_proxy` / `detach_http_proxy` point a
+proxy at a host's backing VM (the host must be `bootstrapping` or `active`).
 
 `doctor` fetches `GET /doctor` — read-only dependency health. The service
 runs one cheap, non-mutating probe per dependency (database, active VM
