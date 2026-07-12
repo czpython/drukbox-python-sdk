@@ -7,12 +7,19 @@ name = "drukbox-python-sdk"
 version = "0.0.7"
 description = "Async Python client for Drukbox."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 # Tracks the lowest Python any current consumer supports. Bump only
 # when a real consumer needs a 3.12+ feature.
 requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.28",
 ]
+
+[project.urls]
+Homepage = "https://github.com/clawhaven/drukbox-python-sdk"
+Repository = "https://github.com/clawhaven/drukbox-python-sdk"
+Issues = "https://github.com/clawhaven/drukbox-python-sdk/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/drukbox_sdk"]
