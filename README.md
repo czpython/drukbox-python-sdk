@@ -119,4 +119,4 @@ uv run pytest
 Tests use `respx` to fake the Drukbox HTTP API. They do not need a
 real network, VM provider, or Drukbox service.
 
-[Drukbox]: https://github.com/clawhaven/drukbox
+[Drukbox]: https://github.com/czpython/drukbox
