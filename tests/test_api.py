@@ -12,6 +12,7 @@ gives us a controllable transport layer so every test stays in-process.
 # pyright: reportPrivateUsage=false
 
 import asyncio
+import json
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Any
@@ -24,6 +25,7 @@ import respx
 from drukbox_sdk import (
     HTTPProxy,
     HTTPProxyAttachment,
+    Issuer,
     SandboxAPI,
     SandboxAuthError,
     SandboxConflictError,
@@ -32,6 +34,7 @@ from drukbox_sdk import (
     SandboxResponseError,
     SandboxUnavailableError,
     SandboxValidationError,
+    Secret,
 )
 
 BASE_URL = "https://sandbox.test"
@@ -266,6 +269,115 @@ async def test_create_host_409_when_template_is_building(api: SandboxAPI):
 
     with pytest.raises(SandboxConflictError, match="is building"):
         await api.create_host(template=template_id)
+
+
+@respx.mock
+async def test_create_host_sends_secrets_with_only_the_fields_set(api: SandboxAPI):
+    route = respx.post(f"{BASE_URL}/hosts").mock(
+        return_value=httpx.Response(201, json=_host_payload()),
+    )
+
+    await api.create_host(
+        secrets={
+            "anthropic": Issuer(
+                "https://mint.test/box-1/anthropic",
+                headers={"Authorization": "Bearer d2d"},
+                refresh="1h",
+            ),
+            "openai": Secret("sk-real"),
+            "acme": Secret("ak_real", host="api.acme.test", auth_variable="ACME_TOKEN"),
+        },
+    )
+
+    body = json.loads(route.calls.last.request.content)
+    assert body["secrets"] == {
+        "anthropic": {
+            "issuer": {
+                "url": "https://mint.test/box-1/anthropic",
+                "headers": {"Authorization": "Bearer d2d"},
+                "refresh": "1h",
+            }
+        },
+        "openai": {"value": "sk-real"},
+        "acme": {"value": "ak_real", "host": "api.acme.test", "auth_variable": "ACME_TOKEN"},
+    }
+
+
+@respx.mock
+async def test_create_host_omits_secrets_when_unset(api: SandboxAPI):
+    route = respx.post(f"{BASE_URL}/hosts").mock(
+        return_value=httpx.Response(201, json=_host_payload()),
+    )
+
+    await api.create_host()
+
+    assert "secrets" not in json.loads(route.calls.last.request.content)
+
+
+@respx.mock
+async def test_create_host_keeps_an_empty_auth_prefix(api: SandboxAPI):
+    route = respx.post(f"{BASE_URL}/hosts").mock(
+        return_value=httpx.Response(201, json=_host_payload()),
+    )
+    custom = {"host": "api.acme.test", "auth_variable": "ACME_TOKEN", "auth_prefix": ""}
+
+    await api.create_host(
+        secrets={
+            "acme": Secret("ak_real", **custom),
+            "acme-minted": Issuer("https://mint.test/acme", {"X-Key": "k"}, "1h", **custom),
+        },
+    )
+
+    body = json.loads(route.calls.last.request.content)
+    assert body["secrets"]["acme"]["auth_prefix"] == ""
+    assert body["secrets"]["acme-minted"]["auth_prefix"] == ""
+
+
+def test_a_record_never_shows_its_credential():
+    secret = Secret("VALUE_MARKER", host="api.acme.test", auth_variable="ACME_TOKEN")
+    issuer = Issuer("https://mint.test/acme", {"Authorization": "ISSUER_MARKER"}, "1h")
+
+    shown = repr({"acme": secret, "minted": issuer})
+
+    assert "VALUE_MARKER" not in shown
+    assert "ISSUER_MARKER" not in shown
+    assert "api.acme.test" in shown and "https://mint.test/acme" in shown
+
+
+def test_the_custom_service_fields_are_keywords():
+    with pytest.raises(TypeError):
+        Secret("ak_real", "api.acme.test")  # type: ignore[misc]
+    with pytest.raises(TypeError):
+        Issuer("https://mint.test", {"X-Key": "k"}, "1h", "api.acme.test")  # type: ignore[misc]
+
+
+@respx.mock
+async def test_create_host_409_without_the_secrets_proxy_raises_conflict(api: SandboxAPI):
+    respx.post(f"{BASE_URL}/hosts").mock(
+        return_value=httpx.Response(
+            409,
+            json={
+                "detail": "secrets need the secrets proxy, which this deployment lacks",
+                "error_code": "SECRETS_PROXY_NOT_CONFIGURED",
+            },
+        ),
+    )
+
+    with pytest.raises(SandboxConflictError, match="secrets proxy"):
+        await api.create_host(secrets={"openai": Secret("sk-real")})
+
+
+@respx.mock
+async def test_create_host_422_for_an_unknown_secret_service_raises_validation(api: SandboxAPI):
+    respx.post(f"{BASE_URL}/hosts").mock(
+        return_value=httpx.Response(
+            422,
+            json={"detail": [{"loc": ["body", "secrets"], "msg": "unknown secret service 'acme'"}]},
+        ),
+    )
+
+    with pytest.raises(SandboxValidationError, match="unknown secret service"):
+        await api.create_host(secrets={"acme": Secret("ak_real")})
 
 
 @respx.mock

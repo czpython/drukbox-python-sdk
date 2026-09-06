@@ -39,7 +39,7 @@ For env-backed config use :meth:`SandboxAPI.from_env`.
 import asyncio
 import os
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Self
 
@@ -106,6 +106,50 @@ class SandboxHost:
     updated_at: str
     activated_at: str | None
     expires_at: str | None
+
+
+@dataclass(frozen=True, kw_only=True)
+class _Service:
+    """The custom service fields of a secret. None is unset. An empty
+    ``auth_prefix`` is set, and Drukbox reads it as no prefix."""
+
+    host: str | None = None
+    auth_variable: str | None = None
+    auth_header: str | None = None
+    auth_prefix: str | None = None
+
+    def get_service(self) -> dict[str, Any]:
+        fields = {
+            "host": self.host,
+            "auth_variable": self.auth_variable,
+            "auth_header": self.auth_header,
+            "auth_prefix": self.auth_prefix,
+        }
+        return {name: value for name, value in fields.items() if value is not None}
+
+
+@dataclass(frozen=True)
+class Secret(_Service):
+    """A credential the caller holds."""
+
+    value: str = field(repr=False)
+
+    def entry(self) -> dict[str, Any]:
+        return {**self.get_service(), "value": self.value}
+
+
+@dataclass(frozen=True)
+class Issuer(_Service):
+    """A credential Drukbox fetches from ``url`` with ``headers``, and again
+    every ``refresh`` when the answer carries no ``expires_at``."""
+
+    url: str
+    headers: dict[str, str] = field(repr=False)
+    refresh: str
+
+    def entry(self) -> dict[str, Any]:
+        issuer = {"url": self.url, "headers": dict(self.headers), "refresh": self.refresh}
+        return {**self.get_service(), "issuer": issuer}
 
 
 @dataclass(frozen=True)
@@ -240,6 +284,7 @@ class SandboxAPI:
         instance_type: str | None = None,
         permanent: bool = False,
         provider: str | None = None,
+        secrets: dict[str, Secret | Issuer] | None = None,
         template: uuid.UUID | str | None = None,
     ) -> SandboxHost:
         """Provision a new host.
@@ -274,6 +319,9 @@ class SandboxAPI:
         Lease: omit ``expires_at`` for the service's default lease, pass a
         ``datetime`` for an explicit expiry, or pass ``permanent=True`` for
         a host the janitor never reaps.
+
+        ``secrets`` maps a service name to a :class:`Secret` or an
+        :class:`Issuer`. The response carries no secret.
         """
 
         if expires_at and permanent:
@@ -295,6 +343,8 @@ class SandboxAPI:
             payload["instance_type"] = instance_type
         if provider is not None:
             payload["provider"] = provider
+        if secrets:
+            payload["secrets"] = {name: entry.entry() for name, entry in secrets.items()}
         if template is not None:
             payload["template"] = str(template)
 

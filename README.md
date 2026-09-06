@@ -58,6 +58,8 @@ Public exports live in `drukbox_sdk`:
 - `SandboxAPI`
 - `SandboxHost`
 - `SandboxTemplate`
+- `Secret`
+- `Issuer`
 - `DoctorReport` and `DoctorCheck`
 - `HTTPProxy` and `HTTPProxyAttachment`
 - `SandboxAPIError` and typed subclasses for auth, not found, conflict,
@@ -75,12 +77,38 @@ Supported host operations:
 - `aclose`
 
 `create_host` supports the service's optional `image`, `env`, `expires_at`,
-`permanent`, `provider`, `instance_type`, `disk_gb`, `template`, and
-`Idempotency-Key` inputs. `instance_type` (provider-native size, e.g.
+`permanent`, `provider`, `instance_type`, `disk_gb`, `template`, `secrets`,
+and `Idempotency-Key` inputs. `instance_type` (provider-native size, e.g.
 `t3.xlarge` / `cx33`) and `disk_gb` pin the VM shape; omit either for the
 provider default. Omit `expires_at` for the default lease, pass a datetime for
 an explicit expiry, or pass `permanent=True` for a never-reaped host.
 `template` accepts a template ID. An explicit `image` wins over it.
+
+`secrets` gives the box credentials it never sees. Each entry is a `Secret`,
+a value the caller holds, or an `Issuer`, a URL Drukbox fetches the value
+from. The box gets a placeholder per entry in the service's variable, and the
+Drukbox swaps it on the way out. A custom service names its `host` and
+`auth_variable`:
+
+```python
+from drukbox_sdk import Issuer, Secret
+
+host = await sandbox.create_host(
+    secrets={
+        "anthropic": Issuer(
+            "https://mint.example/box-1/anthropic",
+            headers={"Authorization": "Bearer ..."},
+            refresh="1h",
+        ),
+        "openai": Secret("sk-..."),
+        "acme": Secret("ak_...", host="api.acme.test", auth_variable="ACME_TOKEN"),
+    },
+)
+```
+
+The response carries no secret. A service name Drukbox does not know raises
+`SandboxValidationError`. A deployment without the secrets proxy raises
+`SandboxConflictError`.
 
 `renew_host` extends a host's lease via `POST /hosts/{id}/renew`. Omit
 `expires_at` to extend by the service's default TTL; renewal never makes a host

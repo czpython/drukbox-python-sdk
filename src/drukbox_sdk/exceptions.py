@@ -37,8 +37,8 @@ class SandboxNotFoundError(SandboxAPIError):
 class SandboxConflictError(SandboxAPIError):
     """409 — the operation conflicts with the current state.
 
-    e.g. provisioning a Linux user on a host that already has one with
-    the same name.
+    e.g. a template that is still building, or secrets on a deployment
+    without the secrets proxy configured.
     """
 
 
@@ -53,9 +53,10 @@ class SandboxProvisioningError(SandboxAPIError):
 class SandboxValidationError(SandboxAPIError):
     """422 — the service rejected the request payload as invalid.
 
-    e.g. an env key that isn't a valid environment-variable name, or a
-    proxy target URL carrying a path or credentials. The request is
-    malformed, so retrying it unchanged won't help — fix the input.
+    e.g. an env key that isn't a valid environment-variable name, a
+    proxy target URL carrying a path or credentials, or a secret for a
+    service name Drukbox does not know. The request is malformed, so
+    retrying it unchanged won't help — fix the input.
     """
 
 

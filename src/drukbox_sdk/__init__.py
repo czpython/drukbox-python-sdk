@@ -9,9 +9,11 @@ from .api import (
     DoctorReport,
     HTTPProxy,
     HTTPProxyAttachment,
+    Issuer,
     SandboxAPI,
     SandboxHost,
     SandboxTemplate,
+    Secret,
 )
 from .exceptions import (
     SandboxAPIError,
@@ -29,6 +31,7 @@ __all__ = [
     "DoctorReport",
     "HTTPProxy",
     "HTTPProxyAttachment",
+    "Issuer",
     "SandboxAPI",
     "SandboxAPIError",
     "SandboxAuthError",
@@ -40,4 +43,5 @@ __all__ = [
     "SandboxTemplate",
     "SandboxUnavailableError",
     "SandboxValidationError",
+    "Secret",
 ]

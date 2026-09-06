@@ -25,7 +25,7 @@ object is a sandbox host.
 
 ```text
 src/drukbox_sdk/
-  api.py          # SandboxAPI, records, parsers, HTTP request handling
+  api.py          # SandboxAPI, records (SandboxHost, Secret, Issuer, ...), HTTP request handling
   exceptions.py   # SDK exception hierarchy
   __init__.py     # Public exports
 tests/
