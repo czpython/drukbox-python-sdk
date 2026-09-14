@@ -85,10 +85,15 @@ class SandboxHost:
     different SSH auth model (exe.dev's edge proxy, Tailscale ACLs
     via tailscaled-SSH) return None here. A later ``get_host`` call
     always returns None — the key is not persisted server-side.
+
+    ``service_account`` names the service account that created or claimed
+    the host, ``"admin"`` for an admin key, or None for an unclaimed warm
+    host.
     """
 
     id: str
     name: str
+    service_account: str | None
     status: str
     provider: str
     image: str
@@ -194,6 +199,15 @@ class DoctorReport:
     active_provider: str
     tailscale_enabled: bool
     checks: list[DoctorCheck]
+
+
+@dataclass(frozen=True)
+class ServiceAccount:
+    """A name the service knows a caller by, and the token that caller
+    presents. The service returns the token once, at creation."""
+
+    name: str
+    token: str = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -401,6 +415,18 @@ class SandboxAPI:
     async def delete_host(self, host_id: uuid.UUID | str) -> None:
         await self._request("DELETE", f"/hosts/{host_id}")
 
+    async def refresh_secret(self, host_id: uuid.UUID | str, service: str) -> None:
+        """Make the service forget the current value of ``service`` on the
+        host and fetch a new one from its issuer.
+
+        Raises :class:`SandboxNotFoundError` for an unknown host or secret,
+        :class:`SandboxConflictError` for a secret with a static value, and
+        :class:`SandboxUnavailableError` when the exchange or the issuer did
+        not answer.
+        """
+
+        await self._request("POST", f"/hosts/{host_id}/secrets/{service}/refresh")
+
     async def create_template(
         self,
         *,
@@ -465,6 +491,27 @@ class SandboxAPI:
             tailscale_enabled=data["tailscale_enabled"],
             checks=[DoctorCheck(**check) for check in data["checks"]],
         )
+
+    async def create_service_account(self, name: str) -> ServiceAccount:
+        """Create a service account and return its token.
+
+        Only an admin key from the service's ``SERVICE_TOKENS`` may call
+        this. A name that already exists raises
+        :class:`SandboxConflictError`; an invalid name raises
+        :class:`SandboxValidationError`.
+        """
+
+        data = await self._request("POST", "/service-accounts", json={"name": name})
+        return ServiceAccount(**data)
+
+    async def remove_service_account(self, name: str) -> None:
+        """Revoke a service account's token and remove the account.
+
+        An unknown name raises :class:`SandboxNotFoundError`; the ``admin``
+        account raises :class:`SandboxConflictError`.
+        """
+
+        await self._request("DELETE", f"/service-accounts/{name}")
 
     async def create_http_proxy(
         self,

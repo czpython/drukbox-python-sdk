@@ -14,6 +14,7 @@ from .api import (
     SandboxHost,
     SandboxTemplate,
     Secret,
+    ServiceAccount,
 )
 from .exceptions import (
     SandboxAPIError,
@@ -44,4 +45,5 @@ __all__ = [
     "SandboxUnavailableError",
     "SandboxValidationError",
     "Secret",
+    "ServiceAccount",
 ]
