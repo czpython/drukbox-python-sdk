@@ -35,6 +35,7 @@ from drukbox_sdk import (
     SandboxUnavailableError,
     SandboxValidationError,
     Secret,
+    ServiceAccount,
 )
 
 BASE_URL = "https://sandbox.test"
@@ -81,6 +82,7 @@ def _host_payload(**overrides: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "id": str(uuid4()),
         "name": "host-abc",
+        "service_account": "admin",
         "status": "provisioning",
         "provider": "exe",
         "image": "ghcr.io/drukbox/sandbox:test",
@@ -419,6 +421,83 @@ async def test_list_hosts_parses_each_record(api: SandboxAPI):
 
     assert len(hosts) == 2
     assert {h.id for h in hosts} == {p["id"] for p in payloads}
+
+
+@respx.mock
+async def test_host_carries_its_service_account(api: SandboxAPI):
+    respx.get(f"{BASE_URL}/hosts/h1").mock(
+        return_value=httpx.Response(200, json=_host_payload(service_account="druks-eu"))
+    )
+
+    host = await api.get_host("h1")
+
+    assert host.service_account == "druks-eu"
+
+
+@respx.mock
+async def test_refresh_secret_posts_and_accepts_204(api: SandboxAPI):
+    route = respx.post(f"{BASE_URL}/hosts/h1/secrets/github/refresh").mock(
+        return_value=httpx.Response(204)
+    )
+
+    await api.refresh_secret("h1", "github")
+
+    assert route.called
+    assert not route.calls.last.request.content
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "status, error",
+    [
+        (404, SandboxNotFoundError),
+        (409, SandboxConflictError),
+        (503, SandboxUnavailableError),
+    ],
+)
+async def test_refresh_secret_raises_the_typed_error(
+    api: SandboxAPI, status: int, error: type[Exception]
+):
+    respx.post(f"{BASE_URL}/hosts/h1/secrets/github/refresh").mock(
+        return_value=httpx.Response(status, json={"detail": "no"})
+    )
+
+    with pytest.raises(error):
+        await api.refresh_secret("h1", "github")
+
+
+@respx.mock
+async def test_create_service_account_returns_the_token_once(api: SandboxAPI):
+    route = respx.post(f"{BASE_URL}/service-accounts").mock(
+        return_value=httpx.Response(201, json={"name": "druks-eu", "token": "drkb_secret"})
+    )
+
+    account = await api.create_service_account("druks-eu")
+
+    assert json.loads(route.calls.last.request.content) == {"name": "druks-eu"}
+    assert account == ServiceAccount(name="druks-eu", token="drkb_secret")
+    assert "drkb_secret" not in repr(account)
+
+
+@respx.mock
+async def test_create_service_account_409_raises_conflict(api: SandboxAPI):
+    respx.post(f"{BASE_URL}/service-accounts").mock(
+        return_value=httpx.Response(409, json={"detail": "exists"})
+    )
+
+    with pytest.raises(SandboxConflictError):
+        await api.create_service_account("druks-eu")
+
+
+@respx.mock
+async def test_remove_service_account_swallows_204(api: SandboxAPI):
+    route = respx.delete(f"{BASE_URL}/service-accounts/druks-eu").mock(
+        return_value=httpx.Response(204)
+    )
+
+    await api.remove_service_account("druks-eu")
+
+    assert route.called
 
 
 @respx.mock

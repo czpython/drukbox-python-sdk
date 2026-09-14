@@ -60,6 +60,7 @@ Public exports live in `drukbox_sdk`:
 - `SandboxTemplate`
 - `Secret`
 - `Issuer`
+- `ServiceAccount`
 - `DoctorReport` and `DoctorCheck`
 - `HTTPProxy` and `HTTPProxyAttachment`
 - `SandboxAPIError` and typed subclasses for auth, not found, conflict,
@@ -73,6 +74,7 @@ Supported host operations:
 - `list_hosts`
 - `renew_host`
 - `delete_host`
+- `refresh_secret`
 - `doctor`
 - `aclose`
 
@@ -114,6 +116,24 @@ The response carries no secret. A service name Drukbox does not know raises
 `expires_at` to extend by the service's default TTL; renewal never makes a host
 permanent.
 
+`SandboxHost.service_account` names the service account that created or
+claimed the host, `admin` for an admin key, or `None` for an unclaimed warm
+host.
+
+`refresh_secret` makes the service forget the current value of one secret on
+a host and fetch a new one from its issuer. A static secret raises
+`SandboxConflictError`; an issuer or exchange that did not answer raises
+`SandboxUnavailableError`.
+
+Supported service account operations, admin key only:
+
+- `create_service_account`
+- `remove_service_account`
+
+`create_service_account` returns a `ServiceAccount` with the token the
+service hands out once. Store it. `remove_service_account` revokes it on the
+next request.
+
 Supported template operations:
 
 - `create_template`
@@ -140,7 +160,8 @@ proxy at a host's backing VM (the host must be `bootstrapping` or `active`).
 
 `doctor` fetches `GET /doctor` — read-only dependency health. The service
 runs one cheap, non-mutating probe per dependency (database, active VM
-provider, Tailscale when enabled) and always responds 200, so callers branch
+provider, secrets exchange, Tailscale when enabled) and always responds 200,
+so callers branch
 on `DoctorReport.ok` rather than the HTTP status. A failed `DoctorCheck`
 carries a stable `hint` slug for remediation.
 
