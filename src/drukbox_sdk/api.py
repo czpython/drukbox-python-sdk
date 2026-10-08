@@ -435,14 +435,15 @@ class SandboxAPI:
         base_image: str | None = None,
         label: str | None = None,
     ) -> SandboxTemplate:
-        """Start a template build and return immediately.
+        """Start a template build.
 
-        The service responds 202 with ``status="building"``. Poll
-        :meth:`get_template` until the status becomes ``"available"`` or
-        ``"failed"``. A failed record carries the reason in
-        ``last_error``. A repeated post with the same provider, base
-        image, and setup script returns the existing record without a
-        rebuild.
+        The service pulls the base image, then responds 202 with
+        ``status="building"``. Poll :meth:`get_template` until the status
+        becomes ``"available"`` or ``"failed"``. A failed record carries the
+        reason in ``last_error``. A repeated post with the same provider,
+        base image digest, and setup script returns the existing record. A
+        ``"failed"`` record builds again and keeps its ``last_error`` until
+        that build ends.
         """
 
         payload: dict[str, Any] = {"setup_script": setup_script}
