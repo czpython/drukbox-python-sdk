@@ -19,6 +19,7 @@ from .api import (
 from .exceptions import (
     SandboxAPIError,
     SandboxAuthError,
+    SandboxCapacityError,
     SandboxConflictError,
     SandboxNotFoundError,
     SandboxProvisioningError,
@@ -36,6 +37,7 @@ __all__ = [
     "SandboxAPI",
     "SandboxAPIError",
     "SandboxAuthError",
+    "SandboxCapacityError",
     "SandboxConflictError",
     "SandboxHost",
     "SandboxNotFoundError",

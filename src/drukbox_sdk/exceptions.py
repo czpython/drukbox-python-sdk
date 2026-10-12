@@ -18,6 +18,18 @@ class SandboxUnavailableError(RuntimeError):
     """
 
 
+class SandboxCapacityError(SandboxUnavailableError):
+    """503 — the provider is at its host limit.
+
+    ``retry_after`` is the service's ``Retry-After`` value in seconds:
+    wait at least that long before the next create.
+    """
+
+    def __init__(self, message: str, retry_after: int) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 class SandboxAPIError(RuntimeError):
     """Base for any error the sandbox service returned via HTTP."""
 

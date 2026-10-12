@@ -46,6 +46,8 @@ finally:
 few minutes worst case. The SDK's default `timeout` (300s) covers this. Pass
 an `idempotency_key` for retry safety: a retry with the same key after a
 successful provision returns the original host instead of creating a duplicate.
+A provider at its host limit raises `SandboxCapacityError`, a
+`SandboxUnavailableError` whose `retry_after` gives the seconds to wait.
 
 `SandboxAPI.from_env(prefix="SANDBOX_")` reads
 `SANDBOX_SERVICE_URL`, `SANDBOX_SERVICE_TOKEN`, and optional
