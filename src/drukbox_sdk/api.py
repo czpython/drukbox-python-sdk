@@ -47,6 +47,7 @@ import httpx
 
 from .exceptions import (
     SandboxAuthError,
+    SandboxCapacityError,
     SandboxConflictError,
     SandboxNotFoundError,
     SandboxProvisioningError,
@@ -615,6 +616,11 @@ class SandboxAPI:
             raise SandboxProvisioningError(json_response.get("detail", "provisioning failed"))
 
         if response.status_code == 503:
+            if json_response.get("error_code") == "CAPACITY":
+                raise SandboxCapacityError(
+                    json_response.get("detail", "provider at host limit"),
+                    retry_after=int(response.headers["Retry-After"]),
+                )
             raise SandboxUnavailableError(json_response.get("detail", "service unavailable"))
 
         if response.status_code == 422:

@@ -28,6 +28,7 @@ from drukbox_sdk import (
     Issuer,
     SandboxAPI,
     SandboxAuthError,
+    SandboxCapacityError,
     SandboxConflictError,
     SandboxNotFoundError,
     SandboxProvisioningError,
@@ -794,6 +795,27 @@ async def test_503_raises_sandbox_unavailable_error(api: SandboxAPI):
 
     with pytest.raises(SandboxUnavailableError, match="host teardown"):
         await api.list_hosts()
+
+
+@respx.mock
+async def test_capacity_503_raises_sandbox_capacity_error(api: SandboxAPI):
+    """A 503 with error_code CAPACITY is a host-limit refusal, not an
+    outage. It stays a SandboxUnavailableError so existing retries keep
+    working, and carries the service's Retry-After in seconds."""
+
+    respx.post(f"{BASE_URL}/hosts").mock(
+        return_value=httpx.Response(
+            503,
+            json={"detail": "provider 'exe' is at its host limit", "error_code": "CAPACITY"},
+            headers={"Retry-After": "30"},
+        ),
+    )
+
+    with pytest.raises(SandboxCapacityError, match="host limit") as exc_info:
+        await api.create_host()
+
+    assert isinstance(exc_info.value, SandboxUnavailableError)
+    assert exc_info.value.retry_after == 30
 
 
 @respx.mock
