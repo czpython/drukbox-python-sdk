@@ -1,5 +1,7 @@
 # drukbox-python-sdk
 
+[![All Contributors](https://img.shields.io/github/all-contributors/czpython/drukbox-python-sdk?color=ee8449&style=flat-square)](#contributors)
+
 Async Python client for the [Drukbox] host API.
 
 The SDK builds reusable sandbox templates, provisions sandbox VMs, reads host
@@ -180,5 +182,20 @@ uv run pytest
 
 Tests use `respx` to fake the Drukbox HTTP API. They do not need a
 real network, VM provider, or Drukbox service.
+
+## Contributors
+
+Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification. Contributions of any kind welcome!
 
 [Drukbox]: https://github.com/czpython/drukbox
