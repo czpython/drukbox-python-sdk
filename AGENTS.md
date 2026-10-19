@@ -57,6 +57,7 @@ run.
   consumers unless the user asks for them.
 - Preserve user changes in the worktree; do not clean or rewrite unrelated
   files.
-- A version bump rides alone: one commit (`chore: bump to X`) that touches
-  only `pyproject.toml`, with no other change in it. Never fold the bump into
-  a feature or fix commit. The release tag is cut from the bump commit.
+- A version bump rides alone: its own commit (`chore: bump to X`) that
+  touches only `pyproject.toml`, in its own PR with no other change in it.
+  Never fold the bump into a feature or fix commit or PR. The release tag is
+  cut from the bump commit.
