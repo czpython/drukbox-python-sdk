@@ -198,7 +198,8 @@ class DoctorReport:
 
     ok: bool
     active_provider: str
-    tailscale_enabled: bool
+    # Whether the active provider's hosts join the tailnet.
+    tailnet: bool
     checks: list[DoctorCheck]
 
 
@@ -490,7 +491,8 @@ class SandboxAPI:
         return DoctorReport(
             ok=data["ok"],
             active_provider=data["active_provider"],
-            tailscale_enabled=data["tailscale_enabled"],
+            # drukbox before "Join the tailnet per provider" sent tailscale_enabled.
+            tailnet=data["tailnet"] if "tailnet" in data else data["tailscale_enabled"],
             checks=[DoctorCheck(**check) for check in data["checks"]],
         )
 
