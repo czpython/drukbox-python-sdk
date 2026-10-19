@@ -48,7 +48,7 @@ def _doctor_payload(**overrides: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "ok": True,
         "active_provider": "aws",
-        "tailscale_enabled": True,
+        "tailnet": True,
         "checks": [
             {
                 "name": "db",
@@ -926,6 +926,17 @@ def test_from_env_strips_trailing_slash_via_constructor(
 
 
 @respx.mock
+async def test_doctor_reads_tailscale_enabled_from_an_older_drukbox(api: SandboxAPI):
+    payload = _doctor_payload()
+    payload["tailscale_enabled"] = payload.pop("tailnet")
+    respx.get(f"{BASE_URL}/doctor").mock(return_value=httpx.Response(200, json=payload))
+
+    report = await api.doctor()
+
+    assert report.tailnet is True
+
+
+@respx.mock
 async def test_doctor_parses_report_and_checks(api: SandboxAPI):
     route = respx.get(f"{BASE_URL}/doctor").mock(
         return_value=httpx.Response(200, json=_doctor_payload()),
@@ -937,7 +948,7 @@ async def test_doctor_parses_report_and_checks(api: SandboxAPI):
     assert route.calls.last.request.headers["Authorization"] == "Bearer t-test"
     assert report.ok is True
     assert report.active_provider == "aws"
-    assert report.tailscale_enabled is True
+    assert report.tailnet is True
     assert [check.name for check in report.checks] == ["db", "provider", "tailscale"]
     provider = next(check for check in report.checks if check.name == "provider")
     assert provider.status == "ok"
