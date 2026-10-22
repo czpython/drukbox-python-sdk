@@ -745,6 +745,20 @@ async def test_422_raises_sandbox_validation_error(api: SandboxAPI):
 
 
 @respx.mock
+async def test_422_string_detail_raises_sandbox_validation_error(api: SandboxAPI):
+    # Drukbox answers a refused secret with the issuer's reason as a plain string.
+    respx.post(f"{BASE_URL}/hosts").mock(
+        return_value=httpx.Response(
+            422,
+            json={"detail": "GitHub App not installed for acme", "error_code": "SECRET_REFUSED"},
+        ),
+    )
+
+    with pytest.raises(SandboxValidationError, match=r"^GitHub App not installed for acme$"):
+        await api.create_host()
+
+
+@respx.mock
 async def test_500_raises_sandbox_response_error(api: SandboxAPI):
     respx.get(f"{BASE_URL}/hosts").mock(
         return_value=httpx.Response(500, json={"detail": "boom"}),
