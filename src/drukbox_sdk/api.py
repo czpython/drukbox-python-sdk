@@ -626,11 +626,11 @@ class SandboxAPI:
             raise SandboxUnavailableError(json_response.get("detail", "service unavailable"))
 
         if response.status_code == 422:
-            # FastAPI's 422 detail is a list of error dicts; join the messages
-            # so it reads as a line, not a raw list repr.
-            errors = json_response.get("detail") or []
-            detail = "; ".join(error.get("msg", "") for error in errors) or "validation error"
-            raise SandboxValidationError(detail)
+            # The detail is FastAPI's list of error dicts or the service's own sentence.
+            detail = json_response.get("detail")
+            if isinstance(detail, list):
+                detail = "; ".join(error.get("msg", "") for error in detail)
+            raise SandboxValidationError(detail or "validation error")
 
         if response.status_code >= 400:
             raise SandboxResponseError(json_response.get("detail", "error"))
