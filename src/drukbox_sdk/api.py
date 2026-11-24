@@ -56,6 +56,9 @@ from .exceptions import (
     SandboxValidationError,
 )
 
+# How long past a run's own timeout the request waits: the host and the clone come first.
+RUN_REQUEST_GRACE_SECONDS = 1800.0
+
 # Explicit pool budget. The httpx defaults (100 / 20) are plenty for
 # the SDK's traffic shape (a handful of provisioning calls per agent
 # run), but keeping the values visible at the import site means a
@@ -201,6 +204,20 @@ class DoctorReport:
     # Whether the active provider's hosts join the tailnet.
     tailnet: bool
     checks: list[DoctorCheck]
+
+
+@dataclass(frozen=True)
+class SandboxRun:
+    """What one command printed and how it ended, as the service reports it.
+
+    ``exit_code`` is ``None`` when the command timed out and ``-1`` when a
+    signal killed it. ``output`` is the end of stdout and stderr together.
+    """
+
+    exit_code: int | None
+    timed_out: bool
+    output: str
+    duration_seconds: float
 
 
 @dataclass(frozen=True)
@@ -370,6 +387,75 @@ class SandboxAPI:
 
         data = await self._request("POST", "/hosts", json=payload, headers=headers)
         return SandboxHost(**data)
+
+    async def run_command(
+        self,
+        *,
+        repo_url: str,
+        commit: str,
+        command: str,
+        patch: str | None = None,
+        timeout_seconds: float | None = None,
+        disk_gb: int | None = None,
+        env: dict[str, str] | None = None,
+        image: str | None = None,
+        instance_type: str | None = None,
+        provider: str | None = None,
+        secrets: dict[str, Secret | Issuer] | None = None,
+        template: uuid.UUID | str | None = None,
+    ) -> SandboxRun:
+        """Run one shell command on a host that exists only for it.
+
+        The service creates a host, clones ``repo_url`` at ``commit``, applies
+        ``patch``, runs ``command`` in the root of the checkout, and deletes the
+        host before it answers. The call blocks for all of that.
+
+        ``patch`` is a ``git diff --binary`` that ``git apply`` lays over the
+        commit. Without ``--binary`` a changed binary file cannot apply.
+
+        ``timeout_seconds`` bounds the command (the service defaults to 600 and
+        caps it at 14400). The request waits for the host, the clone, and that
+        long, so it is not cut off by this client's own ``timeout``.
+
+        A command that fails still returns a :class:`SandboxRun` with its exit
+        code. The host fields are those of :meth:`create_host`. The service
+        refuses an ``expires_at``, so this method takes none. A host that could
+        not be created, reached, or cloned onto raises
+        :class:`SandboxProvisioningError` (502). A run that cannot fit in the
+        provider's VM lifetime raises :class:`SandboxValidationError` (422).
+
+        No host id comes back, and none is left for the caller to delete after
+        an error: the service deletes the host itself, and its janitor reaps one
+        that a failed provision leaves behind.
+        """
+
+        payload: dict[str, Any] = {
+            "repo": {"url": repo_url, "commit": commit},
+            "command": command,
+        }
+        if patch is not None:
+            payload["patch"] = patch
+        if timeout_seconds is not None:
+            payload["timeout_seconds"] = timeout_seconds
+        if disk_gb is not None:
+            payload["disk_gb"] = disk_gb
+        if env is not None:
+            payload["env"] = env
+        if image is not None:
+            payload["image"] = image
+        if instance_type is not None:
+            payload["instance_type"] = instance_type
+        if provider is not None:
+            payload["provider"] = provider
+        if secrets:
+            payload["secrets"] = {name: entry.entry() for name, entry in secrets.items()}
+        if template is not None:
+            payload["template"] = str(template)
+
+        # The service provisions, clones, and runs inside this one request.
+        wait = max(self.timeout, (timeout_seconds or 600.0) + RUN_REQUEST_GRACE_SECONDS)
+        data = await self._request("POST", "/hosts/runs", json=payload, timeout=wait)
+        return SandboxRun(**data)
 
     async def get_host(self, host_id: uuid.UUID | str) -> SandboxHost:
         data = await self._request("GET", f"/hosts/{host_id}")
@@ -577,6 +663,7 @@ class SandboxAPI:
         *,
         headers: dict[str, str] | None = None,
         json: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> Any:
         client = await self._get_client()
         request_headers = {
@@ -592,7 +679,7 @@ class SandboxAPI:
                 f"{self.base_url}{path}",
                 json=json,
                 headers=request_headers,
-                timeout=self.timeout,
+                timeout=timeout or self.timeout,
             )
         except httpx.RequestError as exc:
             raise SandboxUnavailableError(f"Sandbox service transport failed: {exc}") from exc

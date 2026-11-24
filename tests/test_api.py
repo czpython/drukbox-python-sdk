@@ -33,6 +33,7 @@ from drukbox_sdk import (
     SandboxNotFoundError,
     SandboxProvisioningError,
     SandboxResponseError,
+    SandboxRun,
     SandboxUnavailableError,
     SandboxValidationError,
     Secret,
@@ -1119,3 +1120,128 @@ async def test_detach_http_proxy_swallows_204(api: SandboxAPI):
     )
 
     await api.detach_http_proxy("gh", host_id)
+
+
+def _run_payload(**overrides: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "exit_code": 0,
+        "timed_out": False,
+        "output": "ok\n",
+        "duration_seconds": 1.5,
+    }
+    return payload | overrides
+
+
+@respx.mock
+async def test_run_command_posts_the_run_and_returns_what_it_printed(api: SandboxAPI):
+    route = respx.post(f"{BASE_URL}/hosts/runs").mock(
+        return_value=httpx.Response(200, json=_run_payload(exit_code=3, output="1 failed\n")),
+    )
+
+    run = await api.run_command(
+        repo_url="https://github.com/acme/app",
+        commit="abc123",
+        command="make test",
+        patch="diff --git a/x b/x\n",
+        timeout_seconds=120,
+        env={"CI": "1"},
+        provider="docker",
+        secrets={"github": Secret(value="token")},
+    )
+
+    assert run == SandboxRun(
+        exit_code=3, timed_out=False, output="1 failed\n", duration_seconds=1.5
+    )
+    sent = route.calls.last.request
+    assert sent.headers["Authorization"] == "Bearer t-test"
+    assert json.loads(sent.content) == {
+        "repo": {"url": "https://github.com/acme/app", "commit": "abc123"},
+        "command": "make test",
+        "patch": "diff --git a/x b/x\n",
+        "timeout_seconds": 120,
+        "env": {"CI": "1"},
+        "provider": "docker",
+        "secrets": {"github": {"value": "token"}},
+    }
+
+
+@respx.mock
+async def test_run_command_sends_only_what_it_was_given(api: SandboxAPI):
+    route = respx.post(f"{BASE_URL}/hosts/runs").mock(
+        return_value=httpx.Response(200, json=_run_payload()),
+    )
+
+    await api.run_command(repo_url="u", commit="c", command="true")
+
+    assert json.loads(route.calls.last.request.content) == {
+        "repo": {"url": "u", "commit": "c"},
+        "command": "true",
+    }
+
+
+@respx.mock
+async def test_run_command_reads_a_timeout_and_a_signal_as_the_service_reports_them(
+    api: SandboxAPI,
+):
+    respx.post(f"{BASE_URL}/hosts/runs").mock(
+        side_effect=[
+            httpx.Response(
+                200, json=_run_payload(exit_code=None, timed_out=True, output="start\n")
+            ),
+            httpx.Response(200, json=_run_payload(exit_code=-1)),
+        ],
+    )
+
+    timed_out = await api.run_command(repo_url="u", commit="c", command="sleep 99")
+    killed = await api.run_command(repo_url="u", commit="c", command="kill -9 $$")
+
+    assert (timed_out.exit_code, timed_out.timed_out, timed_out.output) == (None, True, "start\n")
+    assert (killed.exit_code, killed.timed_out) == (-1, False)
+
+
+@respx.mock
+async def test_run_command_waits_longer_than_the_client_timeout_for_a_long_run(api: SandboxAPI):
+    """The request covers the host, the clone and the command, so the client's own
+    timeout (5 seconds here) must not cut it off."""
+    route = respx.post(f"{BASE_URL}/hosts/runs").mock(
+        return_value=httpx.Response(200, json=_run_payload()),
+    )
+
+    await api.run_command(repo_url="u", commit="c", command="make test", timeout_seconds=3600)
+    await api.run_command(repo_url="u", commit="c", command="true")
+
+    long_run, default_run = (call.request.extensions["timeout"] for call in route.calls)
+    assert long_run["read"] == 3600 + 1800
+    assert default_run["read"] == 600 + 1800
+
+
+@respx.mock
+async def test_other_calls_keep_the_client_timeout(api: SandboxAPI):
+    route = respx.get(f"{BASE_URL}/hosts").mock(return_value=httpx.Response(200, json=[]))
+
+    await api.list_hosts()
+
+    assert route.calls.last.request.extensions["timeout"]["read"] == 5.0
+
+
+@respx.mock
+async def test_run_command_raises_the_typed_errors_of_the_service(api: SandboxAPI):
+    respx.post(f"{BASE_URL}/hosts/runs").mock(
+        side_effect=[
+            httpx.Response(
+                502, json={"detail": "the clone failed: exit=128", "error_code": "RUN_SYNC"}
+            ),
+            httpx.Response(
+                422,
+                json={
+                    "detail": "the provider stops its VMs after 0:45:00",
+                    "error_code": "RUN_TOO_LONG",
+                },
+            ),
+        ],
+    )
+
+    with pytest.raises(SandboxProvisioningError, match="the clone failed"):
+        await api.run_command(repo_url="u", commit="c", command="true")
+    with pytest.raises(SandboxValidationError, match="stops its VMs"):
+        await api.run_command(repo_url="u", commit="c", command="true", timeout_seconds=9000)
