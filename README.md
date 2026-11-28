@@ -144,8 +144,9 @@ Supported template operations:
 - `delete_template`
 
 `create_template` returns immediately with a `building` record. Poll
-`get_template` until the status is `available` or `failed`. A failed record
-carries the reason in `last_error`.
+`get_template` until the status is `available` or `failed`. While it builds,
+`build_step` names the step the build is in. A failed record keeps that step
+and carries the reason in `last_error`.
 
 Supported HTTP-proxy operations:
 

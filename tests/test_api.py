@@ -633,6 +633,19 @@ async def test_get_template_returns_parsed_template(api: SandboxAPI):
     assert template.status == "available"
     assert template.image == "derived:image"
     assert template.last_used_at == payload["last_used_at"]
+    assert template.build_step == ""
+
+
+@respx.mock
+async def test_get_template_carries_the_build_step(api: SandboxAPI):
+    payload = _template_payload(build_step="running setup script: Installing nodejs")
+    respx.get(f"{BASE_URL}/templates/{payload['id']}").mock(
+        return_value=httpx.Response(200, json=payload),
+    )
+
+    template = await api.get_template(payload["id"])
+
+    assert template.build_step == "running setup script: Installing nodejs"
 
 
 @respx.mock
