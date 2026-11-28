@@ -190,6 +190,8 @@ async def test_create_host_omits_image_and_env_when_unset(api: SandboxAPI):
     assert "provider" not in body
     assert "instance_type" not in body
     assert "disk_gb" not in body
+    assert "cpu" not in body
+    assert "memory_gb" not in body
     assert "template" not in body
     assert "Idempotency-Key" not in route.calls.last.request.headers
 
@@ -232,6 +234,32 @@ async def test_create_host_sends_sizing_when_set(api: SandboxAPI):
     assert '"disk_gb":100' in body
     assert host.instance_type == "t3.xlarge"
     assert host.disk_gb == 100
+
+
+@respx.mock
+async def test_create_host_sends_cpu_and_memory_when_set(api: SandboxAPI):
+    route = respx.post(f"{BASE_URL}/hosts").mock(
+        return_value=httpx.Response(201, json=_host_payload()),
+    )
+
+    await api.create_host(cpu=8, memory_gb=16)
+
+    body = route.calls.last.request.content.decode()
+    assert '"cpu":8' in body
+    assert '"memory_gb":16' in body
+
+
+@respx.mock
+async def test_create_host_sends_only_the_size_it_is_given(api: SandboxAPI):
+    route = respx.post(f"{BASE_URL}/hosts").mock(
+        return_value=httpx.Response(201, json=_host_payload()),
+    )
+
+    await api.create_host(cpu=4)
+
+    body = route.calls.last.request.content.decode()
+    assert '"cpu":4' in body
+    assert "memory_gb" not in body
 
 
 @respx.mock

@@ -81,10 +81,11 @@ Supported host operations:
 - `aclose`
 
 `create_host` supports the service's optional `image`, `env`, `expires_at`,
-`permanent`, `provider`, `instance_type`, `disk_gb`, `template`, `secrets`,
-and `Idempotency-Key` inputs. `instance_type` (provider-native size, e.g.
+`permanent`, `provider`, `instance_type`, `disk_gb`, `cpu`, `memory_gb`, `template`,
+`secrets`, and `Idempotency-Key` inputs. `instance_type` (provider-native size, e.g.
 `t3.xlarge` / `cx33`) and `disk_gb` pin the VM shape; omit either for the
-provider default. Omit `expires_at` for the default lease, pass a datetime for
+provider default. `cpu` (vCPUs) and `memory_gb` size the VM by what it needs, on a
+provider that can. Omit `expires_at` for the default lease, pass a datetime for
 an explicit expiry, or pass `permanent=True` for a never-reaped host.
 `template` accepts a template ID. An explicit `image` wins over it.
 

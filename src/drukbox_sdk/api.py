@@ -292,12 +292,14 @@ class SandboxAPI:
     async def create_host(
         self,
         *,
+        cpu: int | None = None,
         disk_gb: int | None = None,
         env: dict[str, str] | None = None,
         expires_at: datetime | None = None,
         idempotency_key: str | None = None,
         image: str | None = None,
         instance_type: str | None = None,
+        memory_gb: int | None = None,
         permanent: bool = False,
         provider: str | None = None,
         secrets: dict[str, Secret | Issuer] | None = None,
@@ -332,6 +334,13 @@ class SandboxAPI:
         either to use the provider's configured default. A size the active
         provider can't serve raises :class:`SandboxResponseError` (400).
 
+        ``cpu`` (vCPUs) and ``memory_gb`` size the VM by what it needs, not by a
+        provider's name for it; omit either to use the provider's default. A
+        provider that can't size a VM this way raises
+        :class:`SandboxResponseError` (400). A size the provider's account
+        does not allow fails the host: it goes to ``"error"`` with the reason
+        in ``last_error``.
+
         Lease: omit ``expires_at`` for the service's default lease, pass a
         ``datetime`` for an explicit expiry, or pass ``permanent=True`` for
         a host the janitor never reaps.
@@ -344,6 +353,8 @@ class SandboxAPI:
             raise ValueError("a permanent host cannot carry an expires_at")
 
         payload: dict[str, Any] = {}
+        if cpu is not None:
+            payload["cpu"] = cpu
         if disk_gb is not None:
             payload["disk_gb"] = disk_gb
         if env is not None:
@@ -357,6 +368,8 @@ class SandboxAPI:
             payload["image"] = image
         if instance_type is not None:
             payload["instance_type"] = instance_type
+        if memory_gb is not None:
+            payload["memory_gb"] = memory_gb
         if provider is not None:
             payload["provider"] = provider
         if secrets:
