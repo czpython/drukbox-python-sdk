@@ -163,9 +163,12 @@ class SandboxTemplate:
     """Snapshot of a reusable sandbox template as returned by the service.
 
     ``status`` moves from ``"building"`` to ``"available"`` or
-    ``"failed"``. While the build runs, ``image`` is empty. A failed
-    build carries its reason in ``last_error``. The record has no
-    ``setup_script`` because the service never echoes it back.
+    ``"failed"``. While the build runs, ``image`` is empty and
+    ``build_step`` names the step the build is in. A failed build keeps
+    the step it failed in and carries its reason in ``last_error``.
+    ``build_step`` is empty from a service that does not send it. The
+    record has no ``setup_script`` because the service never echoes it
+    back.
     """
 
     id: str
@@ -179,6 +182,7 @@ class SandboxTemplate:
     created_at: str
     updated_at: str
     last_used_at: str | None
+    build_step: str = ""
 
 
 @dataclass(frozen=True)
