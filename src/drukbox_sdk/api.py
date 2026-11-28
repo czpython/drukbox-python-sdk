@@ -336,8 +336,10 @@ class SandboxAPI:
 
         ``cpu`` (vCPUs) and ``memory_gb`` size the VM by what it needs, not by a
         provider's name for it; omit either to use the provider's default. A
-        provider that can't size a VM this way, or a size over its limit, raises
-        :class:`SandboxResponseError` (400).
+        provider that can't size a VM this way raises
+        :class:`SandboxResponseError` (400). A size the provider's account
+        does not allow fails the host: it goes to ``"error"`` with the reason
+        in ``last_error``.
 
         Lease: omit ``expires_at`` for the service's default lease, pass a
         ``datetime`` for an explicit expiry, or pass ``permanent=True`` for
